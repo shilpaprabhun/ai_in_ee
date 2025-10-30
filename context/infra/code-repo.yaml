@@ -1,0 +1,390 @@
+# Supported repo types
+# - service: Service repository
+# - infra: Infrastructure repository
+# - schema: Schema repository
+# - test: Test repository
+# - ui: UI repository
+
+
+domains:
+  - name: billing
+    description: Billing and payment processing domain
+    bounded_contexts:
+      - name: accounting-invoicing
+        description: Invoice generation and accounting
+        repos: []
+      
+      - name: accounting-service
+        description: General accounting operations
+        repos: []
+      
+      - name: invoicing
+        description: Billing and invoice management
+        repos: []
+      
+      - name: payment-preferences
+        description: Payment method configuration
+        repos: []
+      
+      - name: payment-transfers
+        description: Payment processing and transfers
+        repos: []
+      
+      - name: pricing
+        description: Pricing models and calculations
+        repos: []
+  
+  - name: channels
+    description: Customer interaction and support channels
+    bounded_contexts:
+      - name: customer-reporting
+        description: Customer-facing reporting and analytics
+        repos: []
+      
+      - name: gp-assist-advisor
+        description: AI-powered customer assistance
+        repos: []
+      
+      - name: help-center
+        description: Customer support and help documentation
+        repos: []
+  
+  - name: compliance
+    description: Regulatory compliance and governance
+    bounded_contexts:
+      - name: global-compliance-engine
+        description: Compliance rules and automation
+        repos: 
+          - name: core-compliance-service
+            url: https://github.com/gp-nova/core-compliance-service
+            type: service
+          - name: gp-compliance-query-infra
+            url: https://github.com/gp-nova/gp-compliance-query-infra
+            type: infra
+          - name: global-compliance-platform-automation-tests   
+            url: https://github.com/gp-nova/global-compliance-platform-automation-tests
+            type: test
+          - name: core-compliance-service-test      
+            url: https://github.com/gp-nova/core-compliance-service-test
+            type: test
+          - name: core-compliance-validation-service      
+            url: https://github.com/gp-nova/core-compliance-validation-service
+            type: service
+          - name: core-compliance-validation-service-test     
+            url: https://github.com/gp-nova/core-compliance-validation-service-test
+            type: test
+          - name: gp-compliance-query 
+            url: https://github.com/gp-nova/gp-compliance-query
+            type: service
+          - name: gp-compliance-query-infra
+            url: https://github.com/gp-nova/gp-compliance-query-infra
+            type: infra
+          - name: compliance-engine-schema-compliance-query
+            url: https://github.com/gp-nova/compliance-engine-schema-compliance-query
+            type: schema
+          - name: compliance-engine-schema-prompt-service     
+            url: https://github.com/gp-nova/compliance-engine-schema-prompt-service
+            type: schema
+          - name: prompt-service-infra
+            url: https://github.com/gp-nova/prompt-service-infra
+            type: infra
+          - name: prompt-service
+            url: https://github.com/gp-nova/prompt-service
+            type: service
+          - name: prompt-service-test
+            url: https://github.com/gp-nova/prompt-service-test
+            type: test  
+          - name: prompts-kmp-e2e-tests   
+            url: https://github.com/gp-nova/prompts-kmp-e2e-tests
+            type: test
+          - name: compliance-engine-schema-guidance-text-service
+            url: https://github.com/gp-nova/compliance-engine-schema-guidance-text-service
+            type: schema
+          - name: guidance-text-service
+            url: https://github.com/gp-nova/guidance-text-service
+            type: service
+          - name: guidance-text-e2e-tests         
+            url: https://github.com/gp-nova/guidance-text-e2e-tests
+            type: service
+          - name: guidance-text-service-test
+            url: https://github.com/gp-nova/guidance-text-service-test
+            type: test
+          - name: guidance-text-directus-extensions     
+            url: https://github.com/gp-nova/guidance-text-directus-extensions
+            type: service                       
+          - name: compliance-engine-schema-core-compliance-service    
+            url: https://github.com/gp-nova/compliance-engine-schema-core-compliance-service
+            type: schema
+          - name: core-compliance-validation-service-schema    
+            url: https://github.com/gp-nova/core-compliance-validation-service-schema
+            type: schema
+          - name: business-glossary-service         
+            url: https://github.com/gp-nova/business-glossary-service
+            type: service
+          - name: business-glossary-service-test
+            url: https://github.com/gp-nova/business-glossary-service-test
+            type: test
+  
+  - name: customer
+    description: Customer relationship and data management
+    bounded_contexts:
+      - name: crm-encapsulation
+        description: CRM system abstraction layer
+        repos: []
+      
+      - name: crm-integration
+        description: CRM system integration
+        repos: []
+      
+      - name: customer
+        description: Core customer management
+        repos: []
+  
+  - name: data-and-ai
+    description: Data platform and artificial intelligence
+    bounded_contexts:
+      - name: ai-engineering
+        description: AI model development and deployment
+        repos: []
+      
+      - name: data-dictionary
+        description: Data catalog and metadata management
+        repos: []
+      
+      - name: data-platform
+        description: Core data infrastructure
+        repos: []
+      
+      - name: data-products
+        description: Data product development and delivery
+        repos: []
+      
+      - name: gia
+        description: Global Intelligence Assistant
+        repos: []
+      
+      - name: knowledge-platform
+        description: Knowledge management and retrieval
+        repos: []
+  
+  - name: enablement
+    description: Developer enablement and platform tools
+    bounded_contexts:
+      - name: automation-tools
+        description: Development and deployment automation
+        repos: []
+      
+      - name: devx-compliance
+        description: Developer experience and compliance tools
+        repos: []
+      
+      - name: instrumentation
+        description: System monitoring and observability
+        repos: []
+      
+      - name: network-hub
+        description: Network infrastructure and connectivity
+        repos: []
+      
+      - name: training
+        description: Training and knowledge management
+        repos: []
+      
+      - name: ui-shell
+        description: Shared UI shell and navigation
+        repos: []
+      
+      - name: well-architected
+        description: Manage Well-Architected quality controls
+        repos: []
+  
+  - name: global-benefits
+    description: Employee benefits and compensation
+    bounded_contexts:
+      - name: benefits
+        description: Benefits enrollment and management
+        repos: []
+  
+  - name: global-payroll
+    description: Payroll processing and expense management
+    bounded_contexts:
+      - name: expense
+        description: Expense reporting and management
+        repos: []
+      
+      - name: payroll-management
+        description: Payroll calculation and processing
+        repos: []
+      
+      - name: time
+        description: Time tracking and management
+        repos: []
+  
+  - name: hr
+    description: Human resources and workforce management
+    bounded_contexts:
+      - name: contract
+        description: Employment contract management
+        repos: []
+      
+      - name: contractor
+        description: Contractor lifecycle management
+        repos: []
+      
+      - name: employment
+        description: Employment relationship management
+        repos: []
+      
+      - name: engagement
+        description: Employee engagement and performance
+        repos: []
+      
+      - name: job
+        description: Job posting and management
+        repos: []
+      
+      - name: worker
+        description: Employee management and operations
+        repos: 
+          - name: core-worker-service-ts
+            url: https://github.com/gp-nova/core-worker-service-ts
+            type: service
+          - name: core-worker-infra
+            url: https://github.com/gp-nova/core-worker-infra
+            type: infra
+          - name: core-worker-schema
+            url: https://github.com/gp-nova/core-worker-schema
+            type: schema
+          - name: worker-service
+            url: https://github.com/gp-nova/worker-service
+            type: service
+          - name: worker-record-test
+            url: https://github.com/gp-nova/worker-record-test
+            type: test
+          - name: core-worker-gp-person-service
+            url: https://github.com/gp-nova/core-worker-gp-person-service
+            type: service
+          - name: core-worker-gp-person-infra
+            url: https://github.com/gp-nova/core-worker-gp-person-infra
+            type: infra
+          - name: identity-verification
+            url: https://github.com/gp-nova/identity-verification
+            type: service
+          - name: identity-verification-webhook
+            url: https://github.com/gp-nova/identity-verification-webhook
+            type: service
+          - name: identity-assurance-schema
+            url: https://github.com/gp-nova/identity-assurance-schema
+            type: schema
+  
+  - name: identity-and-access-control
+    description: Authentication, authorization, and security
+    bounded_contexts:
+      - name: authentication
+        description: User authentication and session management
+        repos: []
+      
+      - name: authorization
+        description: Permission and access control
+        repos: []
+      
+      - name: business-roles-management
+        description: Role-based access control
+        repos: []
+      
+      - name: edge
+        description: Edge security and gateway services
+        repos: []
+      
+      - name: m2m-certificate-authority
+        description: Machine-to-machine certificate management
+        repos: []
+      
+      - name: security-orchestration
+        description: Security workflow automation
+        repos: []
+      
+      - name: tenant-mgmt
+        description: Multi-tenant management
+        repos: []
+      
+      - name: user-record
+        description: User profile and record management
+        repos: []
+  
+  - name: marketing
+    description: Marketing and web presence
+    bounded_contexts:
+      - name: enterprise-apps
+        description: Enterprise marketing applications
+        repos: []
+      
+      - name: gp-website
+        description: Corporate website and content
+        repos: []
+      
+      - name: marketing-automation
+        description: Marketing campaign automation
+        repos: []
+      
+      - name: web-analytics
+        description: Web traffic and behavior analytics
+        repos: []
+  
+  - name: partner
+    description: Partner ecosystem and integrations
+    bounded_contexts:
+      - name: api-products
+        description: API product management and delivery
+        repos: []
+      
+      - name: customer-workday
+        description: Workday integration and services
+        repos: []
+      
+      - name: partner
+        description: Partner relationship management
+        repos: []
+      
+      - name: stack-one-ipaas
+        description: Integration platform as a service
+        repos: []
+  
+  - name: platform-services
+    description: Shared platform capabilities and services
+    bounded_contexts:
+      - name: action-items
+        description: Manage user task lists
+        repos: []
+      
+      - name: agreements
+        description: Contract and agreement management
+        repos: []
+      
+      - name: audit
+        description: Audit logging and compliance
+        repos: []
+      
+      - name: document-management
+        description: Document storage and management
+        repos: []
+      
+      - name: document-signature
+        description: Digital signature services
+        repos: []
+      
+      - name: geo-metadata
+        description: Geographic and location services
+        repos: []
+      
+      - name: interactive-service
+        description: Interactive user services
+        repos: []
+      
+      - name: notifications
+        description: Notification and messaging services
+        repos: []
+      
+      - name: ui-platform
+        description: User interface platform and components
+        repos: []

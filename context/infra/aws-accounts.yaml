@@ -1,0 +1,434 @@
+# This file maps bounded contexts to the AWS accounts where they are deployed
+#Supported AWS account types: dev, test, prod, demo
+
+domains:
+  - name: Billing
+    description: Billing, invoicing, and payment processing
+    bounded_contexts:
+      - name: Accounting Invoicing
+        category: Supporting
+        description: Invoice generation and accounting
+        aws_accounts: []
+      
+      - name: Accounting Service
+        category: Supporting
+        description: General accounting operations
+        aws_accounts: []
+      
+      - name: Invoicing
+        category: Supporting
+        description: Billing and invoice management
+        aws_accounts: []
+      
+      - name: Payment Preferences
+        category: Supporting
+        description: Payment method configuration
+        aws_accounts: []
+      
+      - name: Payment Transfers
+        category: Supporting
+        description: Payment processing and transfers
+        aws_accounts: []
+      
+      - name: Pricing
+        category: Supporting
+        description: Pricing models and calculations
+        aws_accounts: []
+
+  - name: Channels
+    description: Customer-facing channels and support
+    bounded_contexts:
+      - name: Customer Reporting
+        category: Core
+        description: Customer-facing reporting and analytics
+        aws_accounts: []
+      
+      - name: GP Assist Advisor
+        category: Core
+        description: AI-powered customer assistance
+        aws_accounts: []
+      
+      - name: Help Center
+        category: Core
+        description: Customer support and help documentation
+        aws_accounts: []
+
+  - name: Compliance
+    description: Global compliance rules and automation
+    bounded_contexts:
+      - name: Global Compliance Engine
+        category: Supporting
+        description: Compliance rules and automation
+        aws_accounts:
+          - type: dev
+            name: compliance-query-dev
+            account_id: "339712874290"          
+          - type: test
+            name: compliance-query-test
+            account_id: "730335436344"
+          - type: prod
+            name: compliance-query-prod
+            account_id: "905418415769"
+          - type: demo
+            name: compliance-query-demo
+            account_id: "211125573559"   
+          - type: dev 
+            name: core-compliance-service-dev 
+            account_id: "504015242648"
+          - type: test
+            name: core-compliance-service-test
+            account_id: "058264371690"
+          - type: prod
+            name: core-compliance-service-prod
+            account_id: "975050188717"
+          - type: demo
+            name: core-compliance-service-demo
+            account_id: "211125335620"
+          - type: dev
+            name: guidance-text-service-dev
+            account_id: "058264352082"    
+          - type: test
+            name: guidance-text-service-test
+            account_id: "767397855389"
+          - type: prod
+            name: guidance-text-service-prod
+            account_id: "730335632950"
+          - type: demo
+            name: guidance-text-service-demo
+            account_id: "891377101441"
+
+  - name: Customer
+    description: Customer relationship and management
+    bounded_contexts:
+      - name: CRM Encapsulation
+        category: Supporting
+        description: CRM system abstraction layer
+        aws_accounts: []
+      
+      - name: CRM Integration
+        category: Supporting
+        description: CRM system integration
+        aws_accounts: []
+      
+      - name: Customer
+        category: Supporting
+        description: Core customer management
+        aws_accounts: []
+
+  - name: Data and AI
+    description: Data platform and AI services
+    bounded_contexts:
+      - name: AI Engineering
+        category: Generic
+        description: AI model development and deployment
+        aws_accounts: []
+      
+      - name: Data Dictionary
+        category: Generic
+        description: Data catalog and metadata management
+        aws_accounts: []
+      
+      - name: Data Platform
+        category: Generic
+        description: Core data infrastructure
+        aws_accounts: []
+      
+      - name: Data Products
+        category: Generic
+        description: Data product development and delivery
+        aws_accounts: []
+      
+      - name: GIA
+        category: Generic
+        description: Global Intelligence Assistant
+        aws_accounts: []
+      
+      - name: Knowledge Platform
+        category: Generic
+        description: Knowledge management and retrieval
+        aws_accounts: []
+
+  - name: Enablement
+    description: Developer experience and platform enablement
+    bounded_contexts:
+      - name: Automation Tools
+        category: Generic
+        description: Development and deployment automation
+        aws_accounts: []
+      
+      - name: devx compliance
+        category: Generic
+        description: Developer experience and compliance tools
+        aws_accounts: []
+      
+      - name: instrumentation
+        category: Generic
+        description: System monitoring and observability
+        aws_accounts: []
+      
+      - name: Network Hub
+        category: Generic
+        description: Network infrastructure and connectivity
+        aws_accounts: []
+      
+      - name: Training
+        category: Generic
+        description: Training and knowledge management
+        aws_accounts: []
+
+      - name: UI Shell
+        category: Generic
+        description: Shared UI shell and navigation
+        aws_accounts: []
+      
+      - name: Well-Architected
+        category: Generic
+        description: Manage Well-Architected quality controls
+        aws_accounts: []
+
+  - name: Global Benefits
+    description: Benefits enrollment and management
+    bounded_contexts:
+      - name: Benefits
+        category: Core
+        description: Benefits enrollment and management
+        aws_accounts: []
+
+  - name: Global Payroll
+    description: Payroll calculation and processing
+    bounded_contexts:
+      - name: Expense
+        category: Core
+        description: Expense reporting and management
+        aws_accounts: []
+      
+      - name: Payroll Management
+        category: Core
+        description: Payroll calculation and processing
+        aws_accounts: []
+      
+      - name: Time
+        category: Core
+        description: Time tracking and management
+        aws_accounts: []
+
+  - name: HR
+    description: Human resources and employee management
+    bounded_contexts:
+      - name: Contract
+        category: Core
+        description: Employment contract management
+        aws_accounts: [] # * Actual ID - shared with nova-prod
+      
+      - name: Contractor
+        category: Core
+        description: Contractor lifecycle management
+        aws_accounts: [] * Actual ID
+      
+      - name: Employment
+        category: Core
+        description: Employment relationship management
+        aws_accounts: []  # * Actual ID
+      
+      - name: Engagement
+        category: Core
+        description: Employee engagement and performance
+        aws_accounts: [] # * Actual ID
+      
+      - name: Job
+        category: Core
+        description: Job posting and management
+        aws_accounts: []
+      
+      - name: Worker
+        category: Core
+        description: Employee management and operations
+        aws_accounts:
+          - type: dev
+            name: worker-dev
+            account_id: "634114201938"  # * Actual ID
+          - type: test
+            name: worker-test
+            account_id: "400808794398"  # * Actual ID
+          - type: prod
+            name: worker-prod
+            account_id: "205382370719" # * Actual ID
+          - type: demo
+            name: worker-demo
+            account_id: "975050219213"
+          - type: dev
+            name: identity-verification-dev
+            account_id: "407538643750"
+          - type: test
+            name: identity-verification-test
+            account_id: "533267043450"
+          - type: prod
+            name: identity-verification-prod
+            account_id: "211125593670"
+          - type: demo
+            name: identity-verification-demo
+            account_id: "654654554606"
+
+  - name: Identity and Access Control
+    description: Authentication, authorization, and access management
+    bounded_contexts:
+      - name: Authentication
+        category: Generic
+        description: User authentication and session management
+        aws_accounts: []
+      
+      - name: Authorization
+        category: Generic
+        description: Permission and access control
+        aws_accounts: []
+      
+      - name: Business Roles Management
+        category: Generic
+        description: Role-based access control
+        aws_accounts: []
+      
+      - name: Edge
+        category: Generic
+        description: Edge security and gateway services
+        aws_accounts: []
+      
+      - name: M2M Certificate Authority
+        category: Generic
+        description: Machine-to-machine certificate management
+        aws_accounts: []
+      
+      - name: Security Orchestration
+        category: Generic
+        description: Security workflow automation
+        aws_accounts: []
+      
+      - name: Tenant Mgmt
+        category: Generic
+        description: Multi-tenant management
+        aws_accounts: []
+      
+      - name: User Record
+        category: Generic
+        description: User profile and record management
+        aws_accounts: []
+
+  - name: Marketing
+    description: Marketing and customer acquisition
+    bounded_contexts:
+      - name: Enterprise Apps
+        category: Supporting
+        description: Enterprise marketing applications
+        aws_accounts: []
+      
+      - name: GP Website
+        category: Supporting
+        description: Corporate website and content
+        aws_accounts: []
+      
+      - name: Marketing Automation
+        category: Supporting
+        description: Marketing campaign automation
+        aws_accounts: []
+      
+      - name: Web Analytics
+        category: Supporting
+        description: Web traffic and behavior analytics
+        aws_accounts: []
+
+  - name: Partner
+    description: Partner ecosystem and integrations
+    bounded_contexts:
+      - name: API Products
+        category: Core
+        description: API product management and delivery
+        aws_accounts: []
+      
+      - name: Customer Workday
+        category: Core
+        description: Workday integration and services
+        aws_accounts: []
+      
+      - name: Partner
+        category: Core
+        description: Partner relationship management
+        aws_accounts: []
+      
+      - name: Stack One IPaaS
+        category: Core
+        description: Integration platform as a service
+        aws_accounts: []
+
+  - name: Platform Services
+    description: Shared platform capabilities and services
+    bounded_contexts:
+      - name: Action Items
+        category: Supporting
+        description: Manage user task lists
+        aws_accounts: []
+      
+      - name: Agreements
+        category: Supporting
+        description: Contract and agreement management
+        aws_accounts: []
+      
+      - name: Audit
+        category: Supporting
+        description: Audit logging and compliance
+        aws_accounts: []
+      
+      - name: Document Management
+        category: Supporting
+        description: Document storage and management
+        aws_accounts: []
+      
+      - name: Document Signature
+        category: Supporting
+        description: Digital signature services
+        aws_accounts: []
+      
+      - name: GEO Metadata
+        category: Supporting
+        description: Geographic and location services
+        aws_accounts: []
+      
+      - name: Interactive Service
+        category: Supporting
+        description: Interactive user services
+        aws_accounts: []
+      
+      - name: Notifications
+        category: Supporting
+        description: Notification and messaging services
+        aws_accounts: []
+      
+      - name: UI Platform
+        category: Supporting
+        description: User interface platform and components
+        aws_accounts: []
+
+# Metadata
+version: "1.0"
+last_updated: "2025-10-22"
+schema_version: "1.0"
+
+# Account ID Legend:
+# * = Actual account ID extracted from code analysis
+# Numbers without * = Example placeholders (replace with actual values)
+#
+# Known Actual Account IDs:
+# - gp-nova-dev: 504015242648
+# - gp-nova-test: 058264371690
+# - gp-nova-prod: 975050188717
+# - gp-nova-demo: 211125335620
+# - gp-data (databricks): 851725508471
+# - gp-knowledge/CQ: "339712874290"
+#
+# Account Sharing Pattern:
+# - Multiple bounded contexts "with"in same domain often share AWS accounts
+# - Cross-domain services (like Platform Services) may have dedicated accounts
+# - Not all bounded contexts need all environment types (dev/test/prod/demo)
+"#"
+# Usage:
+# - Use this file to determine which AWS account to deploy services to
+"#"- Cross-reference with code repositories to validate account IDs
+# - Update account IDs as new accounts are created or discovered

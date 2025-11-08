@@ -223,7 +223,7 @@ domains:
       - name: Contractor
         category: Core
         description: Contractor lifecycle management
-        aws_accounts: [] * Actual ID
+        aws_accounts: []  # * Actual ID
       
       - name: Employment
         category: Core
@@ -427,8 +427,8 @@ schema_version: "1.0"
 # - Multiple bounded contexts "with"in same domain often share AWS accounts
 # - Cross-domain services (like Platform Services) may have dedicated accounts
 # - Not all bounded contexts need all environment types (dev/test/prod/demo)
-"#"
+#
 # Usage:
 # - Use this file to determine which AWS account to deploy services to
-"#"- Cross-reference with code repositories to validate account IDs
+# - Cross-reference with code repositories to validate account IDs
 # - Update account IDs as new accounts are created or discovered

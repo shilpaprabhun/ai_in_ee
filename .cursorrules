@@ -1,0 +1,79 @@
+# Python Coding Best Practices for Cursor IDE
+
+## General Python Guidelines
+- Follow PEP 8 style guide strictly
+- Use type hints for all function parameters and return values
+- Prefer explicit over implicit (Zen of Python)
+- Keep functions small and focused (single responsibility principle)
+- Use meaningful variable and function names following snake_case convention
+- Classes should use PascalCase
+
+## Code Style
+- Use 4 spaces for indentation (no tabs)
+- Maximum line length: 88 characters (Black formatter default)
+- Use f-strings for string formatting (Python 3.6+)
+- Prefer list comprehensions and generator expressions when appropriate
+- Use context managers (`with` statements) for resource management
+
+## Documentation
+- Write docstrings for all classes, functions, and modules
+- Use Google-style docstrings with Args, Returns, Raises sections
+- Include docstrings even for private methods (prefixed with single underscore)
+- Add type information in docstrings for complex return types
+
+## Error Handling
+- Use specific exception types instead of bare `except:` clauses
+- Always handle exceptions gracefully with proper error messages
+- Use `sys.exit()` with appropriate exit codes in CLI scripts
+- Log errors appropriately (consider using logging module for production code)
+- Provide meaningful error messages to users
+
+## Imports
+- Sort imports alphabetically within each group
+- Avoid wildcard imports (`from module import *`)
+- Place imports at the top of the file (after module docstring)
+
+## Classes and Functions
+- Keep classes focused on a single responsibility
+- Use `__init__` for initialization, keep it simple
+- Prefer composition over inheritance when appropriate
+
+## CLI Scripts
+- Use argparse for command-line argument parsing in complex scripts
+- Provide helpful usage messages
+- Validate input parameters early
+- Use `if __name__ == "__main__":` guard
+- Exit with appropriate exit codes (0 for success, non-zero for errors)
+
+## Security
+- Never hardcode secrets or API keys
+- Use environment variables or secure configuration management
+- Validate and sanitize user inputs
+- Use parameterized queries when interacting with databases
+
+## Code Organization
+- Group related functionality into modules
+- Keep main execution logic in `if __name__ == "__main__":` blocks
+- Separate business logic from I/O operations
+- Use helper functions to break down complex operations
+
+## Comments and Documentation
+- Write self-documenting code (clear names > comments)
+- Use comments to explain "why" not "what"
+- Keep comments up-to-date with code changes
+- Remove commented-out code (use git history instead)
+
+## Specific Patterns for This Project
+- For AWS Lambda metrics: use paginators, handle missing data gracefully
+- For GitHub API calls: handle rate limiting, validate responses
+- For markdown generation: use consistent formatting
+- For date handling: use datetime objects, format consistently (DD-Mmm-YY or similar)
+- Use meaningful default values for optional parameters
+
+## Code Quality
+- Keep functions under 50 lines when possible
+- Keep classes under 300 lines when possible
+- Avoid deep nesting (max 4 levels)
+- Refactor duplicated code into reusable functions
+- Use meaningful variable names that indicate purpose
+

@@ -31,8 +31,9 @@ class ApiGatewayMetrics:
         # Create AWS session for the specified account
         self.session = self._create_session(account_id, region)
         
-        # Initialize AWS clients
-        self.apigateway_client = self.session.client('apigatewayv2', region_name=region)
+        # Initialize AWS clients for both REST APIs (v1) and HTTP APIs (v2)
+        self.apigateway_rest_client = self.session.client('apigateway', region_name=region)
+        self.apigateway_http_client = self.session.client('apigatewayv2', region_name=region)
         self.cloudwatch_client = self.session.client('cloudwatch', region_name=region)
     
     def _create_session(self, account_id: str, region: str = 'us-east-1') -> boto3.Session:
@@ -91,79 +92,156 @@ class ApiGatewayMetrics:
         Retrieve all HTTP/REST API Gateway APIs from the AWS account.
         
         Returns:
-            List of dictionaries with 'ApiId' and 'Name' keys
+            List of dictionaries with 'ApiId', 'Name', and 'Type' keys
+            Type is either 'REST' or 'HTTP'
         """
         apis = []
+        
+        # Get REST APIs (v1)
         try:
-            paginator = self.apigateway_client.get_paginator('get_apis')
-            
+            paginator = self.apigateway_rest_client.get_paginator('get_rest_apis')
             for page in paginator.paginate():
-                for api in page['Items']:
-                    # Only include HTTP APIs (ProtocolType == 'HTTP')
+                for api in page.get('items', []):
+                    apis.append({
+                        'ApiId': api['id'],
+                        'Name': api.get('name', api['id']),
+                        'Type': 'REST'
+                    })
+        except Exception as e:
+            print(f"Error listing REST APIs: {e}")
+        
+        # Get HTTP APIs (v2)
+        try:
+            paginator = self.apigateway_http_client.get_paginator('get_apis')
+            for page in paginator.paginate():
+                for api in page.get('Items', []):
+                    # Include HTTP APIs (ProtocolType == 'HTTP')
                     if api.get('ProtocolType') == 'HTTP':
                         apis.append({
                             'ApiId': api['ApiId'],
-                            'Name': api.get('Name', api['ApiId'])
+                            'Name': api.get('Name', api['ApiId']),
+                            'Type': 'HTTP'
                         })
         except Exception as e:
-            print(f"Error listing APIs: {e}")
+            print(f"Error listing HTTP APIs: {e}")
         
         return apis
     
-    def get_api_stages(self, api_id: str) -> List[str]:
+    def get_api_stages(self, api_id: str, api_type: str = 'HTTP') -> List[str]:
         """
         Retrieve all stages for a given API.
         
         Args:
             api_id: API Gateway API ID
+            api_type: Type of API ('REST' or 'HTTP')
             
         Returns:
             List of stage names
         """
         stages = []
         try:
-            response = self.apigateway_client.get_stages(ApiId=api_id)
-            for stage in response.get('Items', []):
-                stages.append(stage['StageName'])
+            if api_type == 'REST':
+                response = self.apigateway_rest_client.get_stages(restApiId=api_id)
+                for stage in response.get('item', []):
+                    stages.append(stage['stageName'])
+            else:  # HTTP
+                response = self.apigateway_http_client.get_stages(ApiId=api_id)
+                for stage in response.get('Items', []):
+                    stages.append(stage['StageName'])
         except Exception as e:
-            print(f"Error getting stages for API {api_id}: {e}")
+            print(f"Error getting stages for API {api_id} ({api_type}): {e}")
         
         return stages
     
     def get_endpoint_method_combinations(
         self,
         api_name: str,
-        stage: Optional[str]
+        api_id: str,
+        stage: Optional[str],
+        api_type: str = 'HTTP'
     ) -> List[Tuple[str, str]]:
         """
-        Discover all unique Method and Resource combinations for an API.
+        Discover all unique Method and Resource/Route combinations for an API.
+        First queries API Gateway directly to get all configured endpoints,
+        then supplements with CloudWatch metrics to catch any endpoints with metrics.
         
         Args:
             api_name: Name of the API Gateway API
+            api_id: ID of the API Gateway API
             stage: Stage name (optional, None for all stages)
+            api_type: Type of API ('REST' or 'HTTP')
             
         Returns:
-            List of tuples (method, resource) representing unique endpoint combinations
+            List of tuples (method, resource/route) representing unique endpoint combinations
         """
         combinations = set()
+        
+        # First, discover endpoints from API Gateway configuration directly
         try:
-            # Use list_metrics to discover all unique dimension combinations
-            dimensions = [
-                {
-                    'Name': 'ApiName',
-                    'Value': api_name
-                }
-            ]
+            if api_type == 'REST':
+                # Get all resources from REST API
+                paginator = self.apigateway_rest_client.get_paginator('get_resources')
+                for page in paginator.paginate(restApiId=api_id, embed=['methods']):
+                    for resource in page.get('items', []):
+                        resource_path = resource.get('path', '')
+                        resource_id = resource.get('id', '')
+                        
+                        # Get methods for this resource from the response
+                        resource_methods = resource.get('resourceMethods', {})
+                        if resource_methods:
+                            for method_name in resource_methods.keys():
+                                if method_name.upper() in ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS']:
+                                    combinations.add((method_name.upper(), resource_path))
+                        else:
+                            # If methods not in response, try fetching resource explicitly
+                            try:
+                                methods_response = self.apigateway_rest_client.get_resource(
+                                    restApiId=api_id,
+                                    resourceId=resource_id,
+                                    embed=['methods']
+                                )
+                                resource_methods = methods_response.get('resourceMethods', {})
+                                for method_name in resource_methods.keys():
+                                    if method_name.upper() in ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS']:
+                                        combinations.add((method_name.upper(), resource_path))
+                            except Exception:
+                                pass
+            else:  # HTTP API
+                # Get all routes from HTTP API
+                paginator = self.apigateway_http_client.get_paginator('get_routes')
+                for page in paginator.paginate(ApiId=api_id):
+                    for route in page.get('Items', []):
+                        route_key = route.get('RouteKey', '')
+                        # RouteKey format: "GET /path" or "$default"
+                        if route_key and not route_key.startswith('$'):
+                            parts = route_key.split(' ', 1)
+                            if len(parts) == 2:
+                                method = parts[0].upper()
+                                route_path = parts[1]
+                                if method in ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS']:
+                                    combinations.add((method, route_path))
+        except Exception as e:
+            print(f"Error discovering endpoints from API Gateway config for {api_name}/{stage} ({api_type}): {e}")
+        
+        # Also check CloudWatch metrics to supplement (in case some endpoints only appear in metrics)
+        try:
+            if api_type == 'REST':
+                # REST APIs use AWS/ApiGateway namespace with ApiName dimension
+                namespace = 'AWS/ApiGateway'
+                dimensions = [{'Name': 'ApiName', 'Value': api_name}]
+                resource_key = 'Resource'
+            else:  # HTTP
+                # HTTP APIs use AWS/ApiGatewayV2 namespace with ApiId dimension
+                namespace = 'AWS/ApiGatewayV2'
+                dimensions = [{'Name': 'ApiId', 'Value': api_id}]
+                resource_key = 'Route'
             
             if stage:
-                dimensions.append({
-                    'Name': 'Stage',
-                    'Value': stage
-                })
+                dimensions.append({'Name': 'Stage', 'Value': stage})
             
             # Query for any metric to discover dimension combinations
             response = self.cloudwatch_client.list_metrics(
-                Namespace='AWS/ApiGateway',
+                Namespace=namespace,
                 Dimensions=dimensions
             )
             
@@ -174,7 +252,7 @@ class ApiGatewayMetrics:
                 for dim in metric.get('Dimensions', []):
                     if dim['Name'] == 'Method':
                         method = dim['Value']
-                    elif dim['Name'] == 'Resource':
+                    elif dim['Name'] == resource_key:
                         resource = dim['Value']
                 
                 if method and resource:
@@ -183,7 +261,7 @@ class ApiGatewayMetrics:
             # Handle pagination
             while 'NextToken' in response:
                 response = self.cloudwatch_client.list_metrics(
-                    Namespace='AWS/ApiGateway',
+                    Namespace=namespace,
                     Dimensions=dimensions,
                     NextToken=response['NextToken']
                 )
@@ -195,75 +273,72 @@ class ApiGatewayMetrics:
                     for dim in metric.get('Dimensions', []):
                         if dim['Name'] == 'Method':
                             method = dim['Value']
-                        elif dim['Name'] == 'Resource':
+                        elif dim['Name'] == resource_key:
                             resource = dim['Value']
                     
                     if method and resource:
                         combinations.add((method, resource))
         
         except Exception as e:
-            print(f"Error discovering endpoints for {api_name}/{stage}: {e}")
+            print(f"Error discovering endpoints from CloudWatch for {api_name}/{stage} ({api_type}): {e}")
         
         return sorted(list(combinations))
     
     def get_cloudwatch_metric_data(
         self,
         api_name: str,
+        api_id: str,
         stage: Optional[str],
         method: Optional[str],
         resource: Optional[str],
         metric_name: str,
         start_time: datetime,
         end_time: datetime,
-        statistic: str
+        statistic: str,
+        api_type: str = 'HTTP'
     ) -> List[Dict]:
         """
         Retrieve CloudWatch metric data for a specific API Gateway API endpoint.
         
         Args:
             api_name: Name of the API Gateway API
+            api_id: ID of the API Gateway API
             stage: Stage name (optional, None for all stages)
             method: HTTP method (optional, None for all methods)
-            resource: Resource path (optional, None for all resources)
+            resource: Resource/Route path (optional, None for all resources)
             metric_name: CloudWatch metric name
             start_time: Start time for the metric query
             end_time: End time for the metric query
             statistic: Statistic type (Average, Maximum, Minimum, Sum)
+            api_type: Type of API ('REST' or 'HTTP')
             
         Returns:
             List of metric datapoints
         """
         try:
-            dimensions = [
-                {
-                    'Name': 'ApiName',
-                    'Value': api_name
-                }
-            ]
+            if api_type == 'REST':
+                namespace = 'AWS/ApiGateway'
+                dimensions = [{'Name': 'ApiName', 'Value': api_name}]
+                resource_dim_name = 'Resource'
+            else:  # HTTP
+                namespace = 'AWS/ApiGatewayV2'
+                dimensions = [{'Name': 'ApiId', 'Value': api_id}]
+                resource_dim_name = 'Route'
             
             # Add stage dimension if specified
             if stage:
-                dimensions.append({
-                    'Name': 'Stage',
-                    'Value': stage
-                })
+                dimensions.append({'Name': 'Stage', 'Value': stage})
             
             # Add method dimension if specified
             if method:
-                dimensions.append({
-                    'Name': 'Method',
-                    'Value': method
-                })
+                dimensions.append({'Name': 'Method', 'Value': method})
             
-            # Add resource dimension if specified
+            # Add resource/route dimension if specified
             if resource:
-                dimensions.append({
-                    'Name': 'Resource',
-                    'Value': resource
-                })
+                dimensions.append({'Name': resource_dim_name, 'Value': resource})
             
             response = self.cloudwatch_client.get_metric_statistics(
-                Namespace='AWS/ApiGateway',
+                Namespace=namespace,
                 MetricName=metric_name,
                 Dimensions=dimensions,
                 StartTime=start_time,
@@ -274,7 +349,7 @@ class ApiGatewayMetrics:
             return response['Datapoints']
         except Exception as e:
             endpoint_desc = f"{method} {resource}" if method and resource else "aggregated"
-            print(f"Error getting {metric_name} for {api_name}/{stage}/{endpoint_desc}: {e}")
+            print(f"Error getting {metric_name} for {api_name}/{stage}/{endpoint_desc} ({api_type}): {e}")
             return []
     
     def calculate_percentiles(self, values: List[float]) -> Dict[str, float]:
@@ -302,18 +377,22 @@ class ApiGatewayMetrics:
     def get_api_metrics(
         self,
         api_name: str,
+        api_id: str,
         stage: Optional[str] = None,
         method: Optional[str] = None,
-        resource: Optional[str] = None
+        resource: Optional[str] = None,
+        api_type: str = 'HTTP'
     ) -> Dict[str, Dict]:
         """
         Retrieve all metrics for a specific API Gateway API endpoint month by month for the specified date range.
         
         Args:
             api_name: Name of the API Gateway API
+            api_id: ID of the API Gateway API
             stage: Stage name (optional, None aggregates across all stages)
             method: HTTP method (optional, None aggregates across all methods)
-            resource: Resource path (optional, None aggregates across all resources)
+            resource: Resource/Route path (optional, None aggregates across all resources)
+            api_type: Type of API ('REST' or 'HTTP')
             
         Returns:
             Dictionary with metrics for each month (key is month label like 'Oct-25')
@@ -367,7 +446,7 @@ class ApiGatewayMetrics:
             
             for metric_name, statistic, key in metrics_config:
                 datapoints = self.get_cloudwatch_metric_data(
-                    api_name, stage, method, resource, metric_name, month_start, month_end, statistic
+                    api_name, api_id, stage, method, resource, metric_name, month_start, month_end, statistic, api_type
                 )
                 
                 if key.endswith('_values'):
@@ -525,11 +604,12 @@ class ApiGatewayMetrics:
         for i, api in enumerate(apis, 1):
             api_id = api['ApiId']
             api_name = api['Name']
-            print(f"Processing API {i}/{len(apis)}: {api_name} ({api_id})")
+            api_type = api.get('Type', 'HTTP')
+            print(f"Processing API {i}/{len(apis)}: {api_name} ({api_id}) [{api_type}]")
             
             try:
                 # Always group by stage for endpoint-level granularity
-                stages = self.get_api_stages(api_id)
+                stages = self.get_api_stages(api_id, api_type)
                 if not stages:
                     stages = [None]  # Use None to indicate no stage filtering
                 
@@ -539,13 +619,13 @@ class ApiGatewayMetrics:
                     print(f"  Processing stage: {stage_key}")
                     
                     # Discover all endpoint+method combinations for this API/stage
-                    endpoint_combinations = self.get_endpoint_method_combinations(api_name, stage)
+                    endpoint_combinations = self.get_endpoint_method_combinations(api_name, api_id, stage, api_type)
                     print(f"    Found {len(endpoint_combinations)} endpoint+method combinations")
                     
                     if not endpoint_combinations:
                         # Fallback: try to get aggregated metrics if no endpoints found
                         print(f"    No endpoints found, trying aggregated metrics...")
-                        metrics = self.get_api_metrics(api_name, stage, None, None)
+                        metrics = self.get_api_metrics(api_name, api_id, stage, None, None, api_type)
                         if metrics:
                             api_metrics_dict[stage_key] = {'ALL': metrics}
                         continue
@@ -556,7 +636,7 @@ class ApiGatewayMetrics:
                         print(f"    Processing endpoint {j}/{len(endpoint_combinations)}: {endpoint_key}")
                         
                         try:
-                            metrics = self.get_api_metrics(api_name, stage, method, resource)
+                            metrics = self.get_api_metrics(api_name, api_id, stage, method, resource, api_type)
                             if metrics:
                                 endpoint_metrics_dict[endpoint_key] = metrics
                         except Exception as e:
@@ -701,15 +781,16 @@ def main():
                     for i, api in enumerate(apis, 1):
                         api_id = api['ApiId']
                         api_name = api['Name']
+                        api_type = api.get('Type', 'HTTP')
                         
                         # Initialize API structure: API -> Stage -> Endpoint -> Month -> Metrics
                         if api_name not in all_api_metrics:
                             all_api_metrics[api_name] = {}
                         
-                        print(f"Processing API {i}/{len(apis)}: {api_name}")
+                        print(f"Processing API {i}/{len(apis)}: {api_name} [{api_type}]")
                         try:
                             # Always group by stage for endpoint-level granularity
-                            stages = metrics_collector.get_api_stages(api_id)
+                            stages = metrics_collector.get_api_stages(api_id, api_type)
                             if not stages:
                                 stages = [None]
                             
@@ -720,11 +801,11 @@ def main():
                                     all_api_metrics[api_name][stage_key] = {}
                                 
                                 # Discover all endpoint+method combinations for this API/stage
-                                endpoint_combinations = metrics_collector.get_endpoint_method_combinations(api_name, stage)
+                                endpoint_combinations = metrics_collector.get_endpoint_method_combinations(api_name, api_id, stage, api_type)
                                 
                                 if not endpoint_combinations:
                                     # Fallback: try aggregated metrics if no endpoints found
-                                    metrics = metrics_collector.get_api_metrics(api_name, stage, None, None)
+                                    metrics = metrics_collector.get_api_metrics(api_name, api_id, stage, None, None, api_type)
                                     if metrics:
                                         endpoint_key = 'ALL'
                                         if endpoint_key not in all_api_metrics[api_name][stage_key]:
@@ -771,7 +852,7 @@ def main():
                                     if endpoint_key not in all_api_metrics[api_name][stage_key]:
                                         all_api_metrics[api_name][stage_key][endpoint_key] = {}
                                     
-                                    metrics = metrics_collector.get_api_metrics(api_name, stage, method, resource)
+                                    metrics = metrics_collector.get_api_metrics(api_name, api_id, stage, method, resource, api_type)
                                     
                                     # Merge metrics from different regions
                                     for period_key, period_data in metrics.items():

@@ -840,7 +840,12 @@ def generate_markdown_table(
     start_date_formatted = start_date.replace('-', '')
     end_date_formatted = end_date.replace('-', '')
     
-    filename = f"GithubDeployments-{start_date_formatted}-{end_date_formatted}.md"
+    # Extract repo names for filename and content
+    repo_names = [extract_repo_name_from_url(url) for url in repo_urls]
+    
+    # Generate filename with repo name (use first repo if multiple repos)
+    repo_name = repo_names[0]
+    filename = f"GithubDeployments-{repo_name}-{start_date_formatted}-{end_date_formatted}.md"
     
     # Build markdown content
     header = [
@@ -860,7 +865,7 @@ def generate_markdown_table(
         "Error Summary"
     ]
     
-    repos_list = ', '.join([extract_repo_name_from_url(url) for url in repo_urls])
+    repos_list = ', '.join(repo_names)
     lines = [
         f"# GitHub Deployments ({start_date} to {end_date})",
         "",

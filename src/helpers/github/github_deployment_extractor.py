@@ -223,6 +223,325 @@ def get_deployment_artifact(owner_repo: str, environment: str, ref: str) -> Opti
     return run_gh_command(command, allow_empty=True)
 
 
+def extract_workflow_run_id_from_statuses(deployment_statuses: List[Dict]) -> Optional[str]:
+    """
+    Extract the GitHub Actions workflow run ID from deployment statuses.
+
+    Args:
+        deployment_statuses: List of deployment status objects
+
+    Returns:
+        Workflow run ID as string if found, otherwise None
+    """
+    if not deployment_statuses:
+        return None
+    # Check each status for a target_url containing /actions/runs/{run_id}
+    for status in deployment_statuses:
+        target_url = status.get('target_url') or status.get('log_url') or ''
+        match = re.search(r'/actions/runs/(\d+)', target_url)
+        if match:
+            return match.group(1)
+    return None
+
+
+def get_workflow_run_data(owner_repo: str, run_id: str) -> Optional[Dict]:
+    """
+    Fetch GitHub Actions workflow run details for timing information.
+
+    Args:
+        owner_repo: Repository in format "owner/repo"
+        run_id: Workflow run ID
+
+    Returns:
+        Workflow run data dict or None
+    """
+    if not run_id:
+        return None
+    command = f'gh api repos/{owner_repo}/actions/runs/{run_id}'
+    return run_gh_command(command, allow_empty=True)
+
+
+def get_workflow_run_jobs(owner_repo: str, run_id: str) -> List[Dict]:
+    """
+    Get all jobs for a workflow run.
+
+    Args:
+        owner_repo: Repository in format "owner/repo"
+        run_id: Workflow run ID
+
+    Returns:
+        List of job objects, empty list if not found or error
+    """
+    if not run_id:
+        return []
+    command = f'gh api repos/{owner_repo}/actions/runs/{run_id}/jobs'
+    result = run_gh_command(command, allow_empty=True)
+    
+    if isinstance(result, dict) and 'jobs' in result:
+        return result['jobs']
+    elif isinstance(result, list):
+        return result
+    
+    return []
+
+
+def get_job_logs(owner_repo: str, job_id: int) -> Optional[str]:
+    """
+    Get logs for a specific job as plain text.
+
+    Args:
+        owner_repo: Repository in format "owner/repo"
+        job_id: Job ID
+
+    Returns:
+        Log text as string or None if not available
+    """
+    if not job_id:
+        return None
+    
+    try:
+        command = f'gh api repos/{owner_repo}/actions/jobs/{job_id}/logs'
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return result.stdout if result.stdout.strip() else None
+    except subprocess.CalledProcessError:
+        # Logs may not be available or job may not exist
+        return None
+    except Exception:
+        return None
+
+
+def extract_error_summary_from_logs(log_text: str, max_words: int = 50) -> str:
+    """
+    Analyze logs to identify root cause and create a concise 50-word summary.
+
+    Args:
+        log_text: Full log text from workflow job
+        max_words: Target word count for summary (default 50)
+
+    Returns:
+        Concise error summary identifying root cause (approximately 50 words)
+    """
+    if not log_text:
+        return ''
+    
+    lines = log_text.split('\n')
+    
+    # Analyze last 500 lines for errors (most recent failures)
+    recent_lines = lines[-500:] if len(lines) > 500 else lines
+    
+    # Key patterns to identify root causes
+    root_cause_patterns = {
+        'cloudformation': r'(?:CloudFormation|CFN|stack).*?(?:failed|error|rollback|UPDATE_FAILED)',
+        'lambda': r'(?:Lambda|Function).*?(?:failed|error|timeout|throttled)',
+        'test': r'(?:test|spec).*?(?:failed|error|assertion)',
+        'build': r'(?:build|compile|npm|yarn|pip).*?(?:failed|error)',
+        'deployment': r'(?:deploy|deployment).*?(?:failed|error|timeout)',
+        'permission': r'(?:permission|access|unauthorized|forbidden)',
+        'timeout': r'(?:timeout|timed out|exceeded)',
+        'resource': r'(?:resource.*?not found|does not exist|already exists)',
+    }
+    
+    # Collect key error information
+    error_context = {
+        'main_error': '',
+        'failed_resource': '',
+        'error_type': '',
+        'error_message': '',
+        'exit_code': '',
+    }
+    
+    # Look for main error message (usually near the end)
+    for i in range(len(recent_lines) - 1, max(0, len(recent_lines) - 50), -1):
+        line = recent_lines[i].strip()
+        if not line or len(line) > 300:
+            continue
+        
+        line_lower = line.lower()
+        
+        # Find exit code
+        exit_match = re.search(r'exit code (\d+)', line_lower)
+        if exit_match and not error_context['exit_code']:
+            error_context['exit_code'] = exit_match.group(1)
+        
+        # Find main error patterns (prioritize ##[error] lines)
+        if '##[error]' in line:
+            if not error_context['main_error']:
+                # Extract meaningful error message
+                error_msg = re.sub(r'##\[error\]', '', line, flags=re.IGNORECASE).strip()
+                error_msg = re.sub(r'^\d{4}-\d{2}-\d{2}T.*?Z\s*', '', error_msg)  # Remove timestamps
+                if error_msg and len(error_msg) < 200:
+                    error_context['main_error'] = error_msg
+        elif 'error:' in line_lower and not error_context['main_error']:
+            error_msg = re.sub(r'^.*?error:\s*', '', line, flags=re.IGNORECASE).strip()
+            error_msg = re.sub(r'^\d{4}-\d{2}-\d{2}T.*?Z\s*', '', error_msg)
+            if error_msg and len(error_msg) < 200:
+                error_context['main_error'] = error_msg
+        
+        # Look for CloudFormation stack failures (common pattern)
+        if 'UPDATE_ROLLBACK_COMPLETE' in line or 'ROLLBACK_COMPLETE' in line:
+            error_context['error_type'] = 'cloudformation'
+            # Extract stack name if available
+            stack_match = re.search(r'stack[:\s]+([A-Za-z0-9_-]+)', line_lower)
+            if stack_match:
+                error_context['failed_resource'] = stack_match.group(1)
+            # Also try to extract from "Failed to create/update the stack: <name>"
+            stack_match2 = re.search(r'(?:create|update)\s+the\s+stack[:\s]+([A-Za-z0-9_-]+)', line_lower)
+            if stack_match2:
+                error_context['failed_resource'] = stack_match2.group(1)
+        
+        # Look for UPDATE_FAILED or CREATE_FAILED (CloudFormation)
+        if 'UPDATE_FAILED' in line or 'CREATE_FAILED' in line:
+            if not error_context['error_type']:
+                error_context['error_type'] = 'cloudformation'
+            # Extract resource name
+            resource_match = re.search(r'UPDATE_FAILED\s+(?:AWS::)?([A-Za-z0-9_-]+)', line)
+            if resource_match:
+                error_context['failed_resource'] = resource_match.group(1)
+            elif not error_context['main_error']:
+                # Use the line as main error if we don't have one
+                error_context['main_error'] = line
+        
+        # Identify error type from patterns
+        for error_type, pattern in root_cause_patterns.items():
+            if re.search(pattern, line, re.IGNORECASE):
+                if not error_context['error_type']:
+                    error_context['error_type'] = error_type
+                # Extract resource name if available
+                if not error_context['failed_resource']:
+                    resource_match = re.search(r'(?:AWS::|Resource:?|Function:?)\s*([A-Za-z0-9_-]+)', line)
+                    if resource_match:
+                        error_context['failed_resource'] = resource_match.group(1)
+        
+        # Look for "Waiter ... failed" messages (CloudFormation waiters)
+        if 'waiter' in line_lower and 'failed' in line_lower:
+            error_context['error_type'] = 'cloudformation'
+            # Extract what the waiter was waiting for
+            waiter_match = re.search(r'waiter\s+([A-Za-z0-9_-]+)\s+failed', line_lower)
+            if waiter_match:
+                error_context['failed_resource'] = waiter_match.group(1)
+            if not error_context['main_error']:
+                error_context['main_error'] = line
+        
+        # Extract stack name from "Failed to create/update the stack: <name>" pattern
+        if 'failed to' in line_lower and 'stack' in line_lower:
+            stack_match = re.search(r'stack[:\s,]+([A-Za-z0-9_-]+)', line_lower)
+            if stack_match and not error_context['failed_resource']:
+                error_context['failed_resource'] = stack_match.group(1)
+                if not error_context['error_type']:
+                    error_context['error_type'] = 'cloudformation'
+    
+    # Build concise summary focusing on root cause
+    summary_parts = []
+    
+    # Determine error category and build summary
+    if error_context['error_type'] == 'cloudformation':
+        # CloudFormation errors: focus on stack and root cause
+        if error_context['failed_resource']:
+            summary_parts.append(f"CloudFormation stack update failed for {error_context['failed_resource']}")
+        else:
+            summary_parts.append("CloudFormation stack update failed")
+        
+        # Extract root cause from main error
+        if error_context['main_error']:
+            # Look for key phrases indicating root cause
+            error_lower = error_context['main_error'].lower()
+            if 'rollback' in error_lower:
+                summary_parts.append("due to rollback")
+            elif 'waiter' in error_lower:
+                summary_parts.append("waiter encountered terminal failure state")
+            elif 'resource' in error_lower and 'update' in error_lower:
+                summary_parts.append("resource update failed")
+            
+            # Extract specific error reason if available
+            reason_match = re.search(r'(?:because|due to|reason:)\s+([^.!?]+)', error_lower)
+            if reason_match:
+                reason = reason_match.group(1).strip()
+                if len(reason.split()) <= 15:
+                    summary_parts.append(f"- {reason}")
+    elif error_context['error_type']:
+        category_map = {
+            'lambda': 'Lambda function',
+            'test': 'Test',
+            'build': 'Build',
+            'deployment': 'Deployment',
+            'permission': 'Permission',
+            'timeout': 'Timeout',
+            'resource': 'Resource',
+        }
+        category = category_map.get(error_context['error_type'], 'Deployment')
+        summary_parts.append(f"{category} failed")
+        
+        if error_context['failed_resource']:
+            summary_parts.append(f"({error_context['failed_resource']})")
+    else:
+        summary_parts.append('Deployment failed')
+    
+    # Add main error message (extract key phrase, limit to essential info)
+    if error_context['main_error'] and len(summary_parts) < 3:
+        # Clean and extract key information
+        error_msg = error_context['main_error']
+        # Remove common prefixes and timestamps
+        error_msg = re.sub(r'^(Error|Failed|Exception):\s*', '', error_msg, flags=re.IGNORECASE)
+        error_msg = re.sub(r'\d{4}-\d{2}-\d{2}T[\d:\.]+Z\s*', '', error_msg)  # Remove timestamps
+        
+        # Extract first meaningful sentence or phrase
+        sentences = re.split(r'[.!?]\s+', error_msg)
+        if sentences:
+            key_msg = sentences[0].strip()
+            # Remove redundant information
+            key_msg = re.sub(r'Process completed with exit code \d+', '', key_msg, flags=re.IGNORECASE)
+            key_msg = re.sub(r'##\[error\]', '', key_msg, flags=re.IGNORECASE)
+            key_msg = ' '.join(key_msg.split())  # Normalize whitespace
+            
+            # Limit length
+            words = key_msg.split()
+            if len(words) > 15:
+                words = words[:15]
+                key_msg = ' '.join(words) + '...'
+            
+            if key_msg and key_msg not in ' '.join(summary_parts):
+                summary_parts.append(f"- {key_msg}")
+    
+    # Add exit code if available and not already mentioned
+    if error_context['exit_code'] and error_context['exit_code'] not in ' '.join(summary_parts):
+        summary_parts.append(f"(exit code {error_context['exit_code']})")
+    
+    # Combine into summary
+    summary = ' '.join(summary_parts)
+    
+    # Ensure it's approximately 50 words
+    words = summary.split()
+    if len(words) > max_words:
+        # Trim to 50 words, prioritizing the beginning (most important info)
+        summary = ' '.join(words[:max_words])
+        if not summary[-1] in '.!?':
+            summary += '...'
+    elif len(words) < 25:
+        # If too short and we have more error context, add it
+        if error_context['main_error']:
+            error_words = error_context['main_error'].split()
+            # Add up to 25 more words
+            additional_words = error_words[:min(25, max_words - len(words))]
+            if additional_words:
+                additional_text = ' '.join(additional_words)
+                # Clean up
+                additional_text = re.sub(r'\d{4}-\d{2}-\d{2}T[\d:\.]+Z\s*', '', additional_text)
+                additional_text = ' '.join(additional_text.split())
+                if additional_text:
+                    summary += ' ' + additional_text
+                    words = summary.split()
+                    if len(words) > max_words:
+                        summary = ' '.join(words[:max_words])
+    
+    return summary.strip()
+
+
 def get_latest_status(deployment_statuses: List[Dict]) -> Optional[Dict]:
     """
     Get the latest deployment status (most recent by updated_at).
@@ -360,15 +679,23 @@ def process_deployment(
     status_created_at = latest_status.get('created_at', '') if latest_status else ''
     status_updated_at = latest_status.get('updated_at', '') if latest_status else ''
     
-    # Fetch deployment artifact data for accurate timing
-    artifact_data = get_deployment_artifact(owner_repo, environment, ref)
-    artifact_id = '-'
-    if artifact_data:
-        artifact_id = str(artifact_data.get('id', '-'))
+    # Extract workflow run id from statuses and fetch run data for accurate timing
+    workflow_run_id = extract_workflow_run_id_from_statuses(statuses)
+    workflow_run_data = get_workflow_run_data(owner_repo, workflow_run_id) if workflow_run_id else None
     
-    # Use artifact data if available, otherwise fall back to status/deployment times
-    deployment_start_time = status_created_at or created_at or ''
-    deployment_end_time = status_updated_at or ''
+    # Use workflow run data if available, otherwise fall back to status/deployment times
+    deployment_start_time = (
+        (workflow_run_data.get('run_started_at') if workflow_run_data else None)
+        or (workflow_run_data.get('created_at') if workflow_run_data else None)
+        or status_created_at
+        or created_at
+        or ''
+    )
+    deployment_end_time = (
+        (workflow_run_data.get('updated_at') if workflow_run_data else None)
+        or status_updated_at
+        or ''
+    )
     
     # Format deployment start date/time
     deployment_datetime = format_datetime(deployment_start_time)
@@ -389,14 +716,12 @@ def process_deployment(
         except (ValueError, AttributeError):
             pass
     
-    # Calculate deployment duration from artifact runtime or status times
+    # Calculate deployment duration from workflow run or status times
     duration_seconds = None
     duration_str = '-'
     
-    # Try to get runtime from artifact if available
-    if artifact_data and artifact_data.get('runtime_ms'):
-        duration_seconds = artifact_data.get('runtime_ms') / 1000  # Convert ms to seconds
-    elif deployment_dt and completion_dt:
+    # Use workflow run timing if available; otherwise derive from status times
+    if deployment_dt and completion_dt:
         duration_seconds = (completion_dt - deployment_dt).total_seconds()
     
     if duration_seconds is not None:
@@ -413,13 +738,47 @@ def process_deployment(
     elif status_state == 'pending':
         duration_str = 'In Progress'
     
-    # Error summary: if status is error or failure, extract first 20 words
+    # Error summary: extract detailed error from workflow logs if available
     error_summary = ''
     if status_state in ['error', 'failure']:
-        if status_description:
-            error_summary = extract_first_n_words(status_description, 20)
+        # Try to get detailed error from workflow logs
+        if workflow_run_id:
+            try:
+                jobs = get_workflow_run_jobs(owner_repo, workflow_run_id)
+                # Find failed jobs
+                failed_jobs = [
+                    job for job in jobs
+                    if job.get('conclusion') in ['failure', 'cancelled']
+                ]
+                
+                if failed_jobs:
+                    # Get logs from first failed job
+                    first_failed_job = failed_jobs[0]
+                    job_id = first_failed_job.get('id')
+                    
+                    if job_id:
+                        log_text = get_job_logs(owner_repo, job_id)
+                        if log_text:
+                            error_summary = extract_error_summary_from_logs(log_text)
+                
+                # Fallback to status description if log extraction failed
+                if not error_summary:
+                    if status_description:
+                        error_summary = extract_first_n_words(status_description, 20)
+                    else:
+                        error_summary = 'Deployment failed'
+            except Exception:
+                # If any error occurs, fall back to basic error message
+                if status_description:
+                    error_summary = extract_first_n_words(status_description, 20)
+                else:
+                    error_summary = 'Deployment failed'
         else:
-            error_summary = 'Deployment failed'
+            # No workflow run ID, use status description
+            if status_description:
+                error_summary = extract_first_n_words(status_description, 20)
+            else:
+                error_summary = 'Deployment failed'
     
     # Find PR associated with commit
     pr_data = None
@@ -443,7 +802,7 @@ def process_deployment(
     return {
         'repo_name': repo_name,
         'deployment_id': str(deployment_id),
-        'deployment_artifact_id': artifact_id,
+        'run_id': str(workflow_run_id) if workflow_run_id else '-',
         'deployment_datetime': deployment_datetime,
         'deployment_dt': deployment_dt,  # For sorting
         'completion_datetime': completion_datetime,
@@ -487,7 +846,7 @@ def generate_markdown_table(
     header = [
         "Repo Name",
         "Deployment ID",
-        "Deployment Artifact ID",
+        "Run ID",
         "Deployment Date/Time",
         "Completion Time",
         "Duration",
@@ -515,7 +874,7 @@ def generate_markdown_table(
         row = [
             sanitize_table_cell(deployment.get('repo_name', '-')),
             sanitize_table_cell(deployment.get('deployment_id', '-')),
-            sanitize_table_cell(deployment.get('deployment_artifact_id', '-')),
+            sanitize_table_cell(deployment.get('run_id', '-')),
             sanitize_table_cell(deployment.get('deployment_datetime', '-')),
             sanitize_table_cell(deployment.get('completion_datetime', '-')),
             sanitize_table_cell(deployment.get('duration', '-')),

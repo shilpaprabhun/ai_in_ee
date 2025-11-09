@@ -573,12 +573,8 @@ def main():
                     continue
             
             # Generate output filename
-            # Format: Lambda-Performance-{start_date}-{end_date}.md
-            filename = f"Lambda-Performance-{start_date_str}-{end_date_str}.md"
-            
-            # If multiple accounts, add account ID to filename to avoid collisions
-            if len(args.account_ids) > 1:
-                filename = f"Lambda-Performance-{start_date_str}-{end_date_str}-{account_id}.md"
+            # Format: LambdaPerformance-{Account-ID}-{start-date}-{end-date}.md
+            filename = f"LambdaPerformance-{account_id}-{start_date_str}-{end_date_str}.md"
             
             output_path = output_dir / filename
             

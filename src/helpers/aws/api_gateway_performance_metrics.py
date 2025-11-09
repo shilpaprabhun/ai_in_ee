@@ -815,11 +815,8 @@ def main():
                     continue
             
             # Generate output filename
-            filename = f"ApiGateway-Performance-{start_date_str}-{end_date_str}.md"
-            
-            # If multiple accounts, add account ID to filename to avoid collisions
-            if len(args.account_ids) > 1:
-                filename = f"ApiGateway-Performance-{start_date_str}-{end_date_str}-{account_id}.md"
+            # Format: APIGatewayPerformance-{Account-ID}-{start-date}-{end-date}.md
+            filename = f"APIGatewayPerformance-{account_id}-{start_date_str}-{end_date_str}.md"
             
             output_path = output_dir / filename
             

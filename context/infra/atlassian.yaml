@@ -1,0 +1,12 @@
+atlassian
+  confluence:
+    server: https://globalization-partners.atlassian.net
+    email: snagavara@g-p.com
+    domains:
+    - name: hr
+        description: Human resources and workforce management
+        bounded_contexts:
+          - name: worker
+            description: Worker management
+            url: https://globalization-partners.atlassian.net/wiki/spaces/NOVA/pages/3246883418/Worker+Domain+Track
+            labels: [WORKER-BC, RCA, RFC, OPERATIONAL-EXCELLENCE]

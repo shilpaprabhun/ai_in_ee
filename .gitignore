@@ -1,3 +1,12 @@
+# environment
+.env
+
+# Generated files
+data/domains/
+
+Obsidian vault files
+.obsidian/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

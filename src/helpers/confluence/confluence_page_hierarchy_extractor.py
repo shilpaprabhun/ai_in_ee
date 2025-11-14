@@ -39,6 +39,26 @@ except ImportError:
     )
     sys.exit(1)
 
+try:
+    import html2text
+except ImportError:
+    print(
+        "Warning: html2text package not installed. HTML formatting will not be preserved. "
+        "Install with: pip install html2text",
+        file=sys.stderr
+    )
+    html2text = None
+
+try:
+    import requests
+except ImportError:
+    print(
+        "Warning: requests package not installed. Some features may not work. "
+        "Install with: pip install requests",
+        file=sys.stderr
+    )
+    requests = None
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -76,6 +96,18 @@ class ConfluencePageHierarchyExtractor:
         except Exception as e:
             print(f"Error connecting to Confluence: {e}", file=sys.stderr)
             sys.exit(1)
+        
+        # Initialize HTML to Markdown converter for preserving formatting
+        if html2text is not None:
+            self.html_converter = html2text.HTML2Text()
+            self.html_converter.ignore_links = False
+            self.html_converter.ignore_images = False
+            self.html_converter.ignore_emphasis = False
+            self.html_converter.body_width = 0  # Don't wrap lines
+            self.html_converter.unicode_snob = True  # Preserve Unicode characters (emojis)
+            self.html_converter.mark_code = True  # Preserve code blocks
+        else:
+            self.html_converter = None
 
     def _extract_page_id_from_url(self, page_url: str) -> Optional[str]:
         """
@@ -260,26 +292,132 @@ class ConfluencePageHierarchyExtractor:
             )
             return False
 
+    def _get_comment_children(self, comment_id: str, depth: int = 0) -> List[Dict]:
+        """
+        Recursively get nested comments (replies) for a comment.
+
+        Args:
+            comment_id: Comment ID
+            depth: Current nesting depth (for indentation)
+
+        Returns:
+            List of nested comment dictionaries
+        """
+        nested_comments = []
+        if depth > 10:  # Prevent infinite recursion
+            return nested_comments
+
+        try:
+            if requests is None:
+                return nested_comments
+
+            # Use REST API v2 to get comment children
+            auth_string = f"{self.email}:{self.api_token}"
+            auth_bytes = auth_string.encode('ascii')
+            auth_b64 = base64.b64encode(auth_bytes).decode('ascii')
+            headers = {
+                'Authorization': f'Basic {auth_b64}',
+                'Accept': 'application/json'
+            }
+
+            # Try REST API v2 endpoint for comment children
+            url = f"{self.server}/wiki/api/v2/footer-comments/{comment_id}/children"
+            response = requests.get(url, headers=headers, params={'limit': 1000}, timeout=10)
+
+            if response.status_code == 200:
+                data = response.json()
+                children = data.get('results', [])
+                
+                for child in children:
+                    comment_data = {
+                        'id': child.get('id'),
+                        'author': child.get('author', {}).get('displayName', 'Unknown'),
+                        'created': child.get('createdAt', ''),
+                        'content': child.get('body', {}).get('storage', {}).get('value', ''),
+                        'depth': depth + 1,
+                    }
+                    nested_comments.append(comment_data)
+                    
+                    # Recursively get nested comments
+                    child_nested = self._get_comment_children(child.get('id'), depth + 1)
+                    nested_comments.extend(child_nested)
+            elif response.status_code == 404:
+                # API v2 might not be available, fall back to v1
+                pass
+            else:
+                # Try alternative endpoint using v1 API
+                try:
+                    # Use the Confluence client's method if available
+                    if hasattr(self.confluence, 'get_comment_by_id'):
+                        child_result = self.confluence.get_comment_by_id(comment_id)
+                        # Process children if available
+                        pass
+                except Exception:
+                    pass
+
+        except Exception as e:
+            # Silently fail for nested comments - not critical
+            pass
+
+        return nested_comments
+
     def _get_page_comments(self, page_id: str) -> List[Dict]:
         """
-        Get all comments for a page.
+        Get all comments for a page, including nested comments (replies).
 
         Args:
             page_id: Page ID
 
         Returns:
-            List of comment dictionaries
+            List of comment dictionaries (flat list with depth indicator)
         """
         comments = []
         try:
-            # Try to get comments using get_page_child_by_type
+            # Try REST API v2 first for better nested comment support
+            if requests is not None:
+                try:
+                    auth_string = f"{self.email}:{self.api_token}"
+                    auth_bytes = auth_string.encode('ascii')
+                    auth_b64 = base64.b64encode(auth_bytes).decode('ascii')
+                    headers = {
+                        'Authorization': f'Basic {auth_b64}',
+                        'Accept': 'application/json'
+                    }
+
+                    url = f"{self.server}/wiki/api/v2/pages/{page_id}/footer-comments"
+                    response = requests.get(url, headers=headers, params={'limit': 1000}, timeout=10)
+
+                    if response.status_code == 200:
+                        data = response.json()
+                        top_level_comments = data.get('results', [])
+                        
+                        for comment in top_level_comments:
+                            comment_data = {
+                                'id': comment.get('id'),
+                                'author': comment.get('author', {}).get('displayName', 'Unknown'),
+                                'created': comment.get('createdAt', ''),
+                                'content': comment.get('body', {}).get('storage', {}).get('value', ''),
+                                'depth': 0,
+                            }
+                            comments.append(comment_data)
+                            
+                            # Get nested comments (replies)
+                            nested = self._get_comment_children(comment.get('id'), depth=0)
+                            comments.extend(nested)
+                        
+                        return comments
+                except Exception:
+                    # Fall back to v1 API
+                    pass
+
+            # Fall back to v1 API
             try:
                 result = self.confluence.get_page_child_by_type(
                     page_id,
                     type='comment',
                     start=0,
                     limit=1000,
-                    expand='body.storage,version'
+                    expand='body.storage,version,children.comment.body.storage,children.comment.version'
                 )
             except (AttributeError, TypeError):
                 # Fall back to getting page with comments expanded
@@ -301,8 +439,26 @@ class ConfluencePageHierarchyExtractor:
                         'author': comment.get('version', {}).get('by', {}).get('displayName', 'Unknown'),
                         'created': comment.get('version', {}).get('when', ''),
                         'content': comment.get('body', {}).get('storage', {}).get('value', ''),
+                        'depth': 0,
                     }
                     comments.append(comment_data)
+                    
+                    # Try to get nested comments using v1 API
+                    try:
+                        comment_children = comment.get('children', {}).get('comment', {}).get('results', [])
+                        for child in comment_children:
+                            child_data = {
+                                'id': child.get('id'),
+                                'author': child.get('version', {}).get('by', {}).get('displayName', 'Unknown'),
+                                'created': child.get('version', {}).get('when', ''),
+                                'content': child.get('body', {}).get('storage', {}).get('value', ''),
+                                'depth': 1,
+                            }
+                            comments.append(child_data)
+                    except Exception:
+                        # Try recursive fetch for nested comments
+                        nested = self._get_comment_children(comment.get('id'), depth=0)
+                        comments.extend(nested)
 
         except Exception as e:
             print(
@@ -384,19 +540,26 @@ class ConfluencePageHierarchyExtractor:
         """
         Get list of viewers for a page.
 
-        Note: Viewers are only available via Content Insights API, which requires
-        Confluence Standard, Premium, or Enterprise subscription with Content Insights enabled.
-        This method attempts to retrieve them but may return an empty list if not available.
+        IMPORTANT: Viewer data is ONLY available via Content Insights API, which requires:
+        - Confluence Standard, Premium, or Enterprise subscription (not available in Free)
+        - Content Insights feature enabled by administrator
+        - User must have appropriate permissions
+        
+        If your Confluence instance doesn't have Content Insights enabled,
+        this method will return an empty list. This is EXPECTED behavior and not an error.
+        
+        The standard Confluence REST API does not provide viewer/analytics data.
 
         Args:
             page_id: Page ID
 
         Returns:
-            List of viewer display names (may be empty if not available)
+            List of viewer display names (empty list if Content Insights not available)
         """
         viewers = []
         try:
-            import requests
+            if requests is None:
+                return viewers
             
             # Create basic auth header
             auth_string = f"{self.email}:{self.api_token}"
@@ -421,6 +584,11 @@ class ConfluencePageHierarchyExtractor:
                             display_name = viewer.get('displayName') or viewer.get('username', 'Unknown')
                             if display_name and display_name != 'Unknown':
                                 viewers.append(display_name)
+                elif response.status_code in [403, 404]:
+                    # 403 = Permission denied (Content Insights not enabled or no access)
+                    # 404 = Endpoint not found (Content Insights not available)
+                    # This is expected for most Confluence instances
+                    pass
             except Exception:
                 # Content Insights API not available - try alternative endpoint
                 try:
@@ -440,9 +608,6 @@ class ConfluencePageHierarchyExtractor:
                     # Analytics endpoint also not available - this is expected for most instances
                     pass
 
-        except ImportError:
-            # requests library not available - skip viewer retrieval
-            pass
         except Exception:
             # Viewers are typically not available via standard API
             # This is expected behavior for most Confluence instances
@@ -473,6 +638,261 @@ class ConfluencePageHierarchyExtractor:
                 file=sys.stderr
             )
             return 1
+
+    def _get_page_created_by(self, page_id: str) -> Optional[str]:
+        """
+        Get the display name of the user who created the page.
+
+        Args:
+            page_id: Page ID
+
+        Returns:
+            Display name of creator, or None if not available
+        """
+        try:
+            page = self.confluence.get_page_by_id(
+                page_id,
+                expand='history'
+            )
+            history = page.get('history', {})
+            created_by = history.get('createdBy', {})
+            return created_by.get('displayName', None)
+
+        except Exception as e:
+            print(
+                f"Warning: Error getting creator for page {page_id}: {e}",
+                file=sys.stderr
+            )
+            return None
+
+    def _get_page_updaters(self, page_id: str) -> List[str]:
+        """
+        Get list of all users who have updated the page (from version history).
+
+        Args:
+            page_id: Page ID
+
+        Returns:
+            List of unique updater display names
+        """
+        updaters = []
+        try:
+            if requests is None:
+                return updaters
+
+            # Create basic auth header
+            auth_string = f"{self.email}:{self.api_token}"
+            auth_bytes = auth_string.encode('ascii')
+            auth_b64 = base64.b64encode(auth_bytes).decode('ascii')
+            headers = {
+                'Authorization': f'Basic {auth_b64}',
+                'Accept': 'application/json'
+            }
+
+            # Get page versions
+            url = f"{self.server}/wiki/rest/api/content/{page_id}/version"
+            response = requests.get(url, headers=headers, params={'limit': 1000}, timeout=10)
+
+            if response.status_code == 200:
+                data = response.json()
+                versions = data.get('results', [])
+
+                updater_set = set()
+                for version in versions:
+                    updater = version.get('by', {}).get('displayName', None)
+                    if updater:
+                        updater_set.add(updater)
+
+                updaters = sorted(list(updater_set))
+
+        except Exception as e:
+            print(
+                f"Warning: Error getting updaters for page {page_id}: {e}",
+                file=sys.stderr
+            )
+
+        return updaters
+
+    def _resolve_account_id_to_display_name(self, account_id: str) -> Optional[str]:
+        """
+        Resolve a Confluence account ID to a user display name.
+
+        Args:
+            account_id: Account ID (e.g., "712020:d3be99c3-d040-4901-ac85-c18b852c6ee7")
+
+        Returns:
+            Display name if found, None otherwise
+        """
+        try:
+            if requests is None:
+                return None
+
+            # Create basic auth header
+            auth_string = f"{self.email}:{self.api_token}"
+            auth_bytes = auth_string.encode('ascii')
+            auth_b64 = base64.b64encode(auth_bytes).decode('ascii')
+            headers = {
+                'Authorization': f'Basic {auth_b64}',
+                'Accept': 'application/json'
+            }
+
+            # Get user info
+            url = f"{self.server}/wiki/rest/api/user"
+            response = requests.get(
+                url,
+                headers=headers,
+                params={'accountId': account_id},
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                user_data = response.json()
+                return user_data.get('displayName', None)
+
+        except Exception:
+            # Silently fail - account ID might not resolve
+            pass
+
+        return None
+
+    def _replace_user_mentions_with_names(self, content: str) -> str:
+        """
+        Replace user mention tags in content with display names before Markdown conversion.
+        
+        This ensures that user mentions in tables and other content are preserved
+        when html2text converts HTML to Markdown.
+        
+        Args:
+            content: Page content in Confluence storage format (XML/HTML)
+            
+        Returns:
+            Content with user mention tags replaced by display names
+        """
+        try:
+            # Cache for resolved account IDs to avoid duplicate API calls
+            account_id_cache = {}
+            
+            def get_display_name(account_id: str) -> str:
+                """Get display name from cache or resolve it."""
+                if account_id not in account_id_cache:
+                    display_name = self._resolve_account_id_to_display_name(account_id)
+                    account_id_cache[account_id] = display_name if display_name else ''
+                return account_id_cache[account_id]
+            
+            # Pattern 1: <ac:link><ri:user ri:account-id="..."/></ac:link>
+            # This is the most common format in tables
+            def replace_user_link(match):
+                full_match = match.group(0)
+                account_id_match = re.search(r'ri:account-id="([^"]+)"', full_match)
+                if account_id_match:
+                    account_id = account_id_match.group(1)
+                    display_name = get_display_name(account_id)
+                    if display_name:
+                        return display_name
+                return ''  # Remove if can't resolve
+            
+            # Replace <ac:link><ri:user .../></ac:link> patterns first
+            # Use non-greedy matching to handle nested tags correctly
+            content = re.sub(
+                r'<ac:link[^>]*>\s*<ri:user[^>]*ri:account-id="([^"]+)"[^>]*/>\s*</ac:link>',
+                replace_user_link,
+                content,
+                flags=re.DOTALL
+            )
+            
+            # Pattern 2: <ri:user ri:account-id="..."/> (standalone, not wrapped in ac:link)
+            # Only match if not already inside an ac:link tag
+            def replace_user_standalone(match):
+                account_id = match.group(1)
+                display_name = get_display_name(account_id)
+                if display_name:
+                    return display_name
+                return ''  # Remove if can't resolve
+            
+            # Replace standalone <ri:user .../> patterns
+            # We need to be careful not to match ones already inside ac:link
+            # Process from right to left to avoid nested tag issues
+            content = re.sub(
+                r'<ri:user[^>]*ri:account-id="([^"]+)"[^>]*/>',
+                replace_user_standalone,
+                content
+            )
+            
+            # Pattern 3: <ac:mention ac:account-id="..."/>
+            def replace_mention(match):
+                account_id = match.group(1)
+                display_name = get_display_name(account_id)
+                if display_name:
+                    return display_name
+                return ''  # Remove if can't resolve
+            
+            content = re.sub(
+                r'<ac:mention[^>]*ac:account-id="([^"]+)"[^>]*/>',
+                replace_mention,
+                content
+            )
+            
+        except Exception as e:
+            print(
+                f"Warning: Error replacing user mentions with names: {e}",
+                file=sys.stderr
+            )
+        
+        return content
+
+    def _extract_user_mentions(self, content: str) -> List[str]:
+        """
+        Extract user mentions (tags) from Confluence storage format content.
+
+        Args:
+            content: Page content in Confluence storage format (XML/HTML)
+
+        Returns:
+            List of unique user display names mentioned in the content
+        """
+        mentioned_users = []
+        try:
+            # Extract account IDs from various mention formats
+            account_ids = []
+
+            # Format 1: <ri:user ri:account-id="..."/>
+            account_ids.extend(re.findall(
+                r'<ri:user[^>]*ri:account-id="([^"]+)"',
+                content
+            ))
+
+            # Format 2: <ri:user ri:userkey="..."/> (legacy)
+            userkeys = re.findall(
+                r'<ri:user[^>]*ri:userkey="([^"]+)"',
+                content
+            )
+            # Note: userkeys might need different resolution, but try account-id first
+
+            # Format 3: <ac:mention ac:account-id="..."/>
+            account_ids.extend(re.findall(
+                r'<ac:mention[^>]*ac:account-id="([^"]+)"',
+                content
+            ))
+
+            # Get unique account IDs
+            unique_account_ids = list(set(account_ids))
+
+            # Resolve account IDs to display names
+            user_set = set()
+            for account_id in unique_account_ids:
+                display_name = self._resolve_account_id_to_display_name(account_id)
+                if display_name:
+                    user_set.add(display_name)
+
+            mentioned_users = sorted(list(user_set))
+
+        except Exception as e:
+            print(
+                f"Warning: Error extracting user mentions: {e}",
+                file=sys.stderr
+            )
+
+        return mentioned_users
 
     def extract_pages(
         self,
@@ -530,7 +950,8 @@ class ConfluencePageHierarchyExtractor:
                 created_date = page.get('version', {}).get('when', '')
                 updated_date = page.get('version', {}).get('when', '')
 
-                # Get creation date from history if available
+                # Get creation date and creator from history if available
+                created_by = None
                 try:
                     # Try to get history via expand parameter
                     page_with_history = self.confluence.get_page_by_id(
@@ -540,12 +961,17 @@ class ConfluencePageHierarchyExtractor:
                     history = page_with_history.get('history', {})
                     if history:
                         created_date = history.get('createdDate', created_date)
+                        created_by_obj = history.get('createdBy', {})
+                        created_by = created_by_obj.get('displayName', None)
                 except Exception:
                     # If history expand doesn't work, try separate call
                     try:
                         history = self.confluence.get_page_history(pid)
-                        if history and history.get('createdBy'):
-                            created_date = history.get('createdDate', created_date)
+                        if history:
+                            if history.get('createdBy'):
+                                created_date = history.get('createdDate', created_date)
+                                created_by_obj = history.get('createdBy', {})
+                                created_by = created_by_obj.get('displayName', None)
                     except Exception:
                         pass
 
@@ -553,14 +979,19 @@ class ConfluencePageHierarchyExtractor:
                     continue
 
                 # Extract all required data
+                page_content = page.get('body', {}).get('storage', {}).get('value', '')
+                
                 page_data = {
                     'id': pid,
                     'title': page.get('title', 'Untitled'),
                     'url': f"{self.server}/wiki{page.get('_links', {}).get('webui', '')}",
-                    'content': page.get('body', {}).get('storage', {}).get('value', ''),
+                    'content': page_content,
                     'created': created_date,
                     'updated': updated_date,
                     'versions_count': self._get_page_versions_count(pid),
+                    'created_by': created_by,
+                    'updaters': self._get_page_updaters(pid),
+                    'mentioned_users': self._extract_user_mentions(page_content),
                     'labels': page_labels,
                     'comments': self._get_page_comments(pid),
                     'reactions': self._get_page_reactions(pid),
@@ -609,10 +1040,39 @@ class ConfluencePageHierarchyExtractor:
                 f"**URL:** [{page['url']}]({page['url']})",
                 f"**Page ID:** {page['id']}",
                 f"**Created:** {page['created'][:10] if page['created'] else 'N/A'}",
+                f"**Created By:** {page.get('created_by', 'N/A')}",
                 f"**Last Updated:** {page['updated'][:10] if page['updated'] else 'N/A'}",
                 f"**Versions:** {page['versions_count']}",
                 "",
             ])
+
+            # Display updaters
+            updaters = page.get('updaters', [])
+            if updaters:
+                updaters_str = ", ".join(updaters)
+                lines.extend([
+                    f"**Updated By:** {updaters_str}",
+                    "",
+                ])
+            else:
+                lines.extend([
+                    "**Updated By:** N/A",
+                    "",
+                ])
+
+            # Display mentioned users
+            mentioned_users = page.get('mentioned_users', [])
+            if mentioned_users:
+                mentioned_str = ", ".join(mentioned_users)
+                lines.extend([
+                    f"**Mentioned Users:** {mentioned_str}",
+                    "",
+                ])
+            else:
+                lines.extend([
+                    "**Mentioned Users:** None",
+                    "",
+                ])
 
             # Labels
             if page['labels']:
@@ -628,12 +1088,21 @@ class ConfluencePageHierarchyExtractor:
                 "",
             ])
             if page['content']:
-                # Convert Confluence storage format to plain text/markdown
-                # This is a simplified conversion - may need HTML parsing
+                # Convert Confluence storage format (HTML) to markdown
                 content = page['content']
-                # Remove HTML tags for basic display
-                content = re.sub(r'<[^>]+>', '', content)
-                lines.append(content)
+                
+                # Replace user mention tags with display names BEFORE converting to markdown
+                # This ensures user names appear in tables and other content
+                content = self._replace_user_mentions_with_names(content)
+                
+                if self.html_converter is not None:
+                    # Use html2text to preserve formatting (headings, tables, emojis, etc.)
+                    markdown_content = self.html_converter.handle(content)
+                    lines.append(markdown_content)
+                else:
+                    # Fallback: basic HTML tag removal
+                    content = re.sub(r'<[^>]+>', '', content)
+                    lines.append(content)
             else:
                 lines.append("*No content*")
             lines.append("")
@@ -645,15 +1114,32 @@ class ConfluencePageHierarchyExtractor:
             ])
             if page['comments']:
                 for comment in page['comments']:
+                    # Indent nested comments based on depth
+                    indent = "  " * comment.get('depth', 0)
+                    indent_prefix = "> " if comment.get('depth', 0) > 0 else ""
+                    
                     lines.extend([
-                        f"**{comment['author']}** ({comment['created'][:10] if comment['created'] else 'N/A'}):",
+                        f"{indent}{indent_prefix}**{comment['author']}** ({comment['created'][:10] if comment['created'] else 'N/A'}):",
                         "",
                     ])
                     if comment['content']:
-                        comment_content = re.sub(r'<[^>]+>', '', comment['content'])
-                        lines.append(comment_content)
+                        if self.html_converter is not None:
+                            # Replace user mentions in comments before converting to markdown
+                            comment_content = self._replace_user_mentions_with_names(comment['content'])
+                            # Convert HTML to markdown preserving formatting
+                            comment_markdown = self.html_converter.handle(comment_content)
+                            # Indent each line of the comment
+                            indented_lines = [
+                                f"{indent}{indent_prefix}{line}" 
+                                for line in comment_markdown.split('\n')
+                            ]
+                            lines.extend(indented_lines)
+                        else:
+                            # Fallback: basic HTML tag removal
+                            comment_content = re.sub(r'<[^>]+>', '', comment['content'])
+                            lines.append(f"{indent}{indent_prefix}{comment_content}")
                     else:
-                        lines.append("*No content*")
+                        lines.append(f"{indent}{indent_prefix}*No content*")
                     lines.append("")
             else:
                 lines.append("*No comments*")

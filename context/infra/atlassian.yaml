@@ -1,7 +1,6 @@
 atlassian
   confluence:
     server: https://globalization-partners.atlassian.net
-    email: snagavara@g-p.com
     domains:
     - name: hr
         description: Human resources and workforce management

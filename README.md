@@ -18,8 +18,5 @@ This repo contains to extract data and metrics from various tools used by Engine
 # Context
 The context in terms of AWS accounts, Github repos and Atlasstian config is present in their respective yaml files in context folder. Please feel free to add/update details for your workload and raise a PR.
 
-# Gathering data
-The helpers in src/helpers will help in gathering data from AWS, Github and Atlassian. Issue commands to the cursor agent.
-
-## Sample commands
-> Gather lambda metrics for the work load HR/worker prod account only for the month of Oct 2025
+# Metrics Extractor Agent
+The Metrics Extractor Agent streamlines data extraction across AWS, Github, Jira and Confluence. It gathers input from the user, establishes connections with the services, extracts data and aggregates across time periods.
